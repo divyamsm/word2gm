@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+import matplotlib as mpl
 from matplotlib import pyplot as plt
 import os
 word2vec = tf.load_op_library(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'word2vec_ops.so'))
@@ -9,6 +10,7 @@ import sys
 import pandas as pd
 from ggplot import * # TODO - make this compatible
 
+#global xrange = range
 # Retrict to CPU only
 os.environ["CUDA_VISIBLE_DEVICES"]=""
 
@@ -16,11 +18,13 @@ class Word2GM(object):
     def __init__(self, save_path, ckpt_file=None, verbose=True):
         # create a new session and a new graph every time this object is constructed
         # if a ckpt file is not provided, use the latest ckpt file.
+        print("s1")
         self.ckpt_file = ckpt_file 
         self.logdir = save_path
         with tf.Graph().as_default() as g:
             with tf.Session(graph=g) as session:
                 self.save_path = save_path
+                print(save_path)
                 self.session = session
                 self.load_model(verbose)
                 self.load_vocab()
@@ -31,22 +35,24 @@ class Word2GM(object):
             re.match(r'(.+)\s([\d]+)\s', line).group(1)])
             for line in open(os.path.join(self.save_path, 'vocab.txt'), 'r')
             ]
-        assert len(id2word) == self.vocab_size, \
-                'Expecting vocab size to match ckpt:{} vocab.txt{}'.format(self.vocab_size, len(id2word))
+        assert len(id2word) == self.vocab_size, 'Expecting vocab size to match ckpt:{} vocab.txt{}'.format(self.vocab_size, len(id2word))
         self.id2word = id2word
+        print(self.id2word)
+        print("abcd")
         word2id = {}
-        for _i in xrange(self.vocab_size):
-            word2id[id2word[_i]] = _i
+        for i in range(self.vocab_size):
+            word2id[id2word[i]] = i
         self.word2id = word2id
 
     def load_model(self, verbose=True):
-        latest_ckpt_file = tf.train.latest_checkpoint(self.save_path) if self.ckpt_file is None else self.ckpt_file
+        if self.ckpt_file is None:
+            latest_ckpt_file = tf.train.latest_checkpoint(self.save_path)
         if verbose and self.ckpt_file is None:
             print('Using the latest checkpoint file', latest_ckpt_file)
         elif verbose:
             print('Using the provided checkpoint file: ', self.ckpt_file)
-
-        meta_graph_path = latest_ckpt_file + '.meta'
+        print(latest_ckpt_file)
+        meta_graph_path = str(latest_ckpt_file) + '.meta'
         new_saver = tf.train.import_meta_graph(meta_graph_path)
         new_saver.restore(self.session, latest_ckpt_file)
 
@@ -119,7 +125,7 @@ class Word2GM(object):
 
     def idxs2words(self, idxs):
         # convert a list of strings to a list of words
-        words = ["{}:{}".format(self.id2word[idx/self.num_mixtures], idx%self.num_mixtures) for idx in idxs]
+        words = ["{}:{}".format(self.id2word[int(idx/self.num_mixtures)], idx%self.num_mixtures) for idx in idxs]
         return words
 
     def sort_low_var(self, idxs):
@@ -130,9 +136,10 @@ class Word2GM(object):
         return [p[0] for p in list_pair], list_pair
 
     def show_nearest_neighbors(self, idx_or_word, cl=0, num_nns=20, plot=True, verbose=False):
-        assert isinstance(idx_or_word, int) or idx_or_word in self.word2id, 'Provide index or word in vocabulary'
         idx = idx_or_word
+        idx_or_word = "b'"+idx_or_word+"'"
         if idx_or_word in self.word2id:
+            print("entered block")
             idx = self.word2id[idx_or_word]
         dist = np.dot(self.mus_n, self.mus_n[idx*self.num_mixtures + cl])
         highsim_idxs = dist.argsort()[::-1]
@@ -143,24 +150,26 @@ class Word2GM(object):
         var_val = np.array([self.detA[_idx] for _idx in highsim_idxs])
         # plot all the words
         if plot:
-            df = pd.DataFrame()
-            df['text'] = words
-            df['sim'] = dist_val
-            df['logvar'] = var_val
+            df = pd.DataFrame({'logvar' : var_val ,'sim': dist_val , 'text': words})
+            #df = pd.DataFrame()
+            #print(len(words), len(dist_val),len(var_val))
+            #df['text'] = words
+            #df['sim'] = dist_val
+            #df['logvar'] = var_val
             mix = self.mixture[idx, cl]
             plot = (ggplot(aes(x='sim', y='logvar', label='text'), data=df)
                     + geom_point(size=5)
                     + geom_text(size=10)
-                    + ggtitle("Neighbors of [{}:{}] with mixture probability {:.4g}".format(self.id2word[idx], cl, mix))
-                    )
-            print plot
-        print 'Top 10 highest similarity'
-        print words[:10]
-        if verbose: print dist_val[:10]
-        print 'Top 10 lowest variance of top {} highest similarity'.format(num_nns)
+                    + ggtitle("Neighbors of [{}:{}] with mixture probability {:.4g}".format(self.id2word[idx], cl, mix)))
+            plot.show()
+            
+        print ('Top 10 highest similarity')
+        print (words[:10])
+        if verbose: print (dist_val[:10])
+        print ('Top 10 lowest variance of top {} highest similarity'.format(num_nns))
         low_var_idxs, var_val = self.sort_low_var(highsim_idxs)
-        print self.idxs2words(low_var_idxs)
-        if verbose: print var_val
+        print (self.idxs2words(low_var_idxs))
+        if verbose: print (var_val)
 
     def words_to_idxs(self, word_list, discard_unk=False, verbose=False):
         assert isinstance(word_list, list), 'Expected a list'
@@ -179,7 +188,7 @@ class Word2GM(object):
         if word in self.word2id:
             return self.word2id[word]
         else:
-            if verbose: print 'Unknown word [{}]'.format(word)
+            if verbose: print ('Unknown word [{}]'.format(word))
             return 0
     #### 
     def dot(self, idx1, cl1, idx2, cl2):
@@ -191,7 +200,7 @@ class Word2GM(object):
         for cl1 in range(self.num_mixtures):
             for cl2 in range(self.num_mixtures):
                 metric_grid[cl1, cl2] = self.dot(idx1, cl1, idx2, cl2)
-                if verbose: print metric_grid
+                if verbose: print (metric_grid)
         return np.max(metric_grid)
 
     def avedot(self, idx1, idx2, verbose=False):
@@ -199,7 +208,7 @@ class Word2GM(object):
         for cl1 in range(self.num_mixtures):
             for cl2 in range(self.num_mixtures):
                 metric_grid[cl1, cl2] = self.dot(idx1, cl1, idx2, cl2)
-                if verbose: print metric_grid
+                if verbose: print( metric_grid)
         return np.mean(metric_grid)
 
     def negkl(self, w1, cl1, w2, cl2):
@@ -242,7 +251,7 @@ class Word2GM(object):
         for cl1 in range(self.num_mixtures):
             for cl2 in range(self.num_mixtures):
                 metric_grid[cl1, cl2] = self.negkl(idx1, cl1, idx2, cl2)
-                if verbose: print metric_grid
+                if verbose: print (metric_grid)
         return np.max(metric_grid)
 
 
@@ -258,14 +267,14 @@ class Word2GM(object):
         for cl1 in range(self.num_mixtures):
             for cl2 in range(self.num_mixtures):
                 metric_grid[cl1, cl2] = self.norm(idx1, cl1, idx2, cl2)
-                if verbose: print metric_grid
+                if verbose: print (metric_grid)
         return -np.min(metric_grid)
 
     def disdot(self, w1, w2):
-    	num_mix = self.num_mixtures
-    	mu1 = self.mus[w1]
-    	mu2 = self.mus[w2]
-    	sigma1 = np.exp(self.logsigs[w1])
+        num_mix = self.num_mixtures
+        mu1 = self.mus[w1]
+        mu2 = self.mus[w2]
+        sigma1 = np.exp(self.logsigs[w1])
         sigma2 = np.exp(self.logsigs[w2])
         mix1 = self.mixture[w1]
         mix2 = self.mixture[w2]
@@ -312,14 +321,14 @@ class Word2GM(object):
             elif criterion == 'mean_of_max':
                 max_scores = np.max(all_scores, axis=1)
                 if verbose:
-                    print 'max scores', max_scores
+                    print ('max scores', max_scores)
                 assert len(max_scores) == len(context)
                 scores[i] = np.mean(max_scores)
 
             if verbose:
-                print 'Mixture ', i 
-                print 'all scores = {} with aggregate score = {}'.format(all_scores, scores[i])
-        cl_max = np.argmax(scores)
+                print ('Mixture ', i )
+                print ('all scores = {} with aggregate score = {}'.format(all_scores, scores[i]))
+                cl_max = np.argmax(scores)
         return cl_max
 
     def wordsim_context(self, w1, c1, w2, c2, metric='dot_context', criterion='max', verbose=False):
@@ -334,7 +343,7 @@ class Word2GM(object):
             return 1.0
 
         if metric == 'dot_context':
-            if verbose: print 'Using dot context'
+            if verbose: print ('Using dot context')
             c1 = self.words_to_idxs(c1, discard_unk=True)
             c2 = self.words_to_idxs(c2, discard_unk=True)
             cl1 = self.find_best_cluster(w1, c1, criterion=criterion, verbose=verbose)
@@ -342,11 +351,11 @@ class Word2GM(object):
             score = self.dot(w1, cl1, w2, cl2)
             return score
         elif metric == 'maxdot':
-            if verbose: print 'Using maxdot'
+            if verbose: print ('Using maxdot')
             score = self.maxdot(w1, w2, verbose=verbose)
             return score
         elif metric == 'avedot':
-            if verbose: print 'Using avedot'
+            if verbose: print ('Using avedot')
             score = self.avedot(w1, w2, verbose=verbose)
 
     def visualize_embeddings(self, port=6006, call_tensorboard=False):
@@ -364,18 +373,18 @@ class Word2GM(object):
         if not os.path.exists(emb_logdir):
             os.makedirs(emb_logdir)
         else:
-            print 'The directory already exists!'
+            print('The directory already exists!')
         thefile = open(emb_logdir + '/labels.csv', 'w')
         for item in labels:
             thefile.write("%s\n" % item)
         with tf.Graph().as_default() as g:
             with tf.Session(graph=g) as session:
                 embedding_var = tf.Variable(mus, name='mus')
-                init = tf.initialize_all_variables()
+                init = tf.global_variables_initializer()
                 init.run()
                 saver = tf.train.Saver()
                 saver.save(session, os.path.join(emb_logdir, "model.ckpt"), 0)
-                summary_writer = tf.train.SummaryWriter(emb_logdir)
+                summary_writer = tf.summary.FileWriter(emb_logdir)
                 config = projector.ProjectorConfig()
                 embedding = config.embeddings.add()
                 embedding.tensor_name = embedding_var.name
@@ -387,5 +396,5 @@ class Word2GM(object):
 
 if __name__=='__main__':
     sess = tf.Session()
-    word2mixgauss = Word2GM(save_path='modelfiles/t8-2s-e10-v05-lr05d-mc100-ss5-nwout-adg-win10', session=sess)
+    word2mixgauss = Word2GM(save_path='modelfiles/t8-2s-e10-v05-lr05d-mc100-ss5-nwout-adg-win10')#, session=sess
     word2mixgauss.show_nearest_neighbors('the', 0, 20)
